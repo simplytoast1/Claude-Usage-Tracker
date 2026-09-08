@@ -52,6 +52,10 @@ final class NotifySettingsStore {
         static let activityId = "notify.activityId"
         static let widgetId = "notify.widgetId"
         static let screenWidgetId = "notify.screenWidgetId"
+
+        /// Only used when this build has no reachable Keychain store. See
+        /// `saveDeviceToken`.
+        static let fallbackToken = "notify.deviceToken.fallback"
     }
 
     init(defaults: UserDefaults = .standard, keychain: KeychainService = .shared) {
@@ -82,45 +86,63 @@ final class NotifySettingsStore {
         defaults.set(deviceId, forKey: Keys.deviceId)
     }
 
-    /// The token, from the Keychain. A read that throws is treated as no token
-    /// rather than as a crash: a locked or refusing Keychain means the app is
-    /// not linked right now, which is a state the pane already knows how to
-    /// show.
+    /// The token: the Keychain when this build can reach one, otherwise the
+    /// fallback below.
     func deviceToken() -> String? {
-        do {
-            let token = try keychain.load(for: .notifyDeviceToken)
-            guard let token, !token.isEmpty else { return nil }
-            return token
-        } catch {
-            LoggingService.shared.logError("Notify!: could not read the device token from the Keychain", error: error)
-            return nil
-        }
+        if let token = keychain.notifyDeviceToken() { return token }
+        return nonEmpty(defaults.string(forKey: Keys.fallbackToken))
     }
 
+    /// Saves the token, and says whether it actually landed.
+    ///
+    /// The Keychain first, and it is confirmed by reading back rather than
+    /// trusted. When this build has no reachable Keychain store at all — the
+    /// ordinary case for an ad-hoc signed local build, where the
+    /// data-protection keychain wants an entitlement the build lacks and the
+    /// file-based fallback is gated off to avoid ACL password prompts — the
+    /// token goes to UserDefaults instead.
+    ///
+    /// That fallback is a cleartext secret on disk, so it is only defensible
+    /// because two things are true. It is the same posture this app already
+    /// takes for per-profile secrets in that situation (they stay in the
+    /// `profiles_v3` plist), and `deviceTokenIsSecure()` lets the settings pane
+    /// say out loud which store won rather than implying the stronger answer.
+    /// A Notify! device token can send notifications to the user's own phone;
+    /// it is not an account credential.
+    ///
+    /// - Returns: false only when neither store would take it.
     @discardableResult
     func saveDeviceToken(_ token: String) -> Bool {
-        do {
-            try keychain.save(token, for: .notifyDeviceToken)
+        if keychain.saveNotifyDeviceToken(token) {
+            // Never leave a stale cleartext copy behind once the real store works.
+            defaults.removeObject(forKey: Keys.fallbackToken)
             return true
-        } catch {
-            LoggingService.shared.logError("Notify!: could not save the device token to the Keychain", error: error)
-            return false
         }
+
+        LoggingService.shared.logWarning(
+            "Notify!: no reachable Keychain store in this build, keeping the device token in app settings instead"
+        )
+        defaults.set(token, forKey: Keys.fallbackToken)
+        return defaults.string(forKey: Keys.fallbackToken) == token
+    }
+
+    /// Whether the stored token is in the Keychain rather than the fallback.
+    ///
+    /// The pane asks so it can say where the token actually is, rather than
+    /// showing a badge that implies the stronger answer.
+    func deviceTokenIsSecure() -> Bool {
+        keychain.notifyDeviceToken() != nil
     }
 
     @discardableResult
     func deleteDeviceToken() -> Bool {
-        do {
-            try keychain.delete(for: .notifyDeviceToken)
-            return true
-        } catch {
-            LoggingService.shared.logError("Notify!: could not delete the device token from the Keychain", error: error)
-            return false
-        }
+        let removedFromKeychain = keychain.deleteNotifyDeviceToken()
+        defaults.removeObject(forKey: Keys.fallbackToken)
+        return removedFromKeychain
     }
 
     func hasDeviceToken() -> Bool {
-        keychain.exists(for: .notifyDeviceToken)
+        deviceToken() != nil
     }
 
     /// The saved credentials as one value, or nil when either half is missing
@@ -140,14 +162,17 @@ final class NotifySettingsStore {
     /// the user has to go and remove by hand. Only a different device id
     /// invalidates them, and then they must go, because they name surfaces on a
     /// phone this link can no longer write to.
-    func saveDeviceLink(_ link: NotifyDeviceLink) {
+    /// - Returns: false when the token could not be stored anywhere, in which
+    ///   case nothing is linked and the caller must not claim otherwise.
+    @discardableResult
+    func saveDeviceLink(_ link: NotifyDeviceLink) -> Bool {
         if deviceId() != link.deviceId {
             setActivityId(nil)
             setWidgetId(nil)
             setScreenWidgetId(nil)
         }
         setDeviceId(link.deviceId)
-        saveDeviceToken(link.token)
+        return saveDeviceToken(link.token)
     }
 
     /// Forgets the link and everything standing on it. The surfaces already on

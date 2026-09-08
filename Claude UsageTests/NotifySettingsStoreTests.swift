@@ -18,6 +18,14 @@ final class NotifySettingsStoreTests: XCTestCase {
     private var defaults: UserDefaults!
     private var store: NotifySettingsStore!
 
+    /// The token this machine had linked before the suite ran, if any.
+    ///
+    /// The switches and handles live in a throwaway defaults suite, but the
+    /// token store is app-wide on a build with a reachable Keychain. Running
+    /// these tests must never cost a developer the device they had linked, so
+    /// whatever was there is put back in tearDown.
+    private var preexistingToken: String?
+
     // The `async throws` overrides rather than the synchronous ones: this class
     // is `@MainActor`, and only the async variants can carry isolation an
     // override adds on top of XCTestCase's own. Same shape as
@@ -26,9 +34,15 @@ final class NotifySettingsStoreTests: XCTestCase {
         suiteName = "notify.tests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         store = NotifySettingsStore(defaults: defaults)
+        preexistingToken = store.deviceToken()
     }
 
     override func tearDown() async throws {
+        store.deleteDeviceToken()
+        if let preexistingToken {
+            store.saveDeviceToken(preexistingToken)
+        }
+        preexistingToken = nil
         defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
         store = nil
@@ -114,5 +128,62 @@ final class NotifySettingsStoreTests: XCTestCase {
     func testTheDeviceIdRoundTrips() {
         store.setDeviceId("IO12345678901234")
         XCTAssertEqual(store.deviceId(), "IO12345678901234")
+    }
+
+    // MARK: - The token
+
+    /// The regression this file exists for. A token that reports itself saved
+    /// and then cannot be read back leaves the pane saying "linked" while every
+    /// publish answers "add your device ID and token". Which store actually
+    /// took it is not the assertion — that it comes back is.
+    func testASavedTokenAlwaysReadsBackAgain() {
+        XCTAssertTrue(store.saveDeviceToken("s3cret-token"))
+        XCTAssertEqual(store.deviceToken(), "s3cret-token")
+    }
+
+    func testSavingALinkReportsThatItLandedAndTheLinkIsReadable() {
+        let link = NotifyDeviceLink(deviceId: "493F9D2A", token: "s3cret-token")!
+
+        XCTAssertTrue(store.saveDeviceLink(link))
+        XCTAssertEqual(store.deviceLink(), link)
+        XCTAssertTrue(store.hasDeviceToken())
+    }
+
+    func testDeletingTheTokenLeavesNothingLinked() {
+        XCTAssertTrue(store.saveDeviceToken("s3cret-token"))
+        store.deleteDeviceToken()
+
+        XCTAssertNil(store.deviceToken())
+        XCTAssertNil(store.deviceLink())
+    }
+
+    /// The handles name surfaces standing on a particular phone, so a link
+    /// pointing somewhere else invalidates them.
+    func testLinkingADifferentDeviceClearsTheSurfaceHandles() {
+        store.setActivityId("LA123456")
+        store.setWidgetId("WG123456")
+        store.setScreenWidgetId("SW123456")
+
+        store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "s3cret")!)
+
+        XCTAssertNil(store.activityId())
+        XCTAssertNil(store.widgetId())
+        XCTAssertNil(store.screenWidgetId())
+    }
+
+    /// A rotated token is the same phone, and the tile and widgets already
+    /// standing on it are still ours. Clearing their handles would orphan them
+    /// and put a duplicate beside each on the next publish.
+    func testRotatingTheTokenForTheSameDeviceKeepsTheHandles() {
+        store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "old")!)
+        store.setActivityId("LA123456")
+        store.setWidgetId("WG123456")
+        store.setScreenWidgetId("SW123456")
+
+        store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "new")!)
+
+        XCTAssertEqual(store.activityId(), "LA123456")
+        XCTAssertEqual(store.widgetId(), "WG123456")
+        XCTAssertEqual(store.screenWidgetId(), "SW123456")
     }
 }

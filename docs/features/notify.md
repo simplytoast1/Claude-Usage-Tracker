@@ -105,7 +105,9 @@ Every other network call this app makes fetches usage from the provider that own
 - **What leaves the machine:** provider names, window labels, remaining percentages or balances, and reset countdowns. No prompts, no repository names, no file paths, no session content.
 - **Where it goes:** `push.getnotifyapp.com`, a third party service, and from there to the user's own phone.
 - **Off by default.** `NotifyConstants.defaultEnabled` is `false`, and the switch stays disabled until a device is linked. A feature that talks to someone else's server cannot ship enabled.
-- **The token is a secret.** It goes to the Keychain under `KeychainKey.notifyDeviceToken` and never to UserDefaults. It is never logged, and neither is the device id above debug level.
+- **The token is a secret.** It goes to the Keychain through the same `saveItem`/`loadItem` helpers the per-profile secrets use, so it gets the data-protection keychain on entitled builds and the file-based login keychain on stably-signed ones. It is never logged, and neither is the device id above debug level.
+- **When no Keychain is reachable, the token falls back and says so.** An ad-hoc signed local build has no store at all: the data-protection keychain wants an application-identifier entitlement the build lacks, and the file-based fallback is deliberately gated off for ad-hoc identities to avoid ACL password prompts (#292). Rather than failing to link, the token goes to UserDefaults, and `deviceTokenIsSecure()` lets the pane say plainly that it is stored in the clear. This is the same posture the app already takes for per-profile secrets in that situation, and a Notify! device token sends notifications to the user's own phone — it is not an account credential.
+- **A save is confirmed, not assumed.** `KeychainService.saveNotifyDeviceToken` reads the token back before reporting success, and `saveDeviceLink` returns that answer. A phantom write would otherwise leave the pane showing a linked device while every publish answered "not linked".
 
 ---
 
@@ -225,8 +227,9 @@ Settings keys, all under `notify.` in UserDefaults:
 | `notify.screenWidgetEnabled` | Whether the Home Screen tile is published. Default `true`, because a 503 is handled as "not yet" rather than as an error, and shipping it off would mean nobody saw the surface on the day Notify! switched it on. |
 | `notify.gauge.providerId`, `notify.gauge.quotaKey` | Which window the gauge shows. Both empty means automatic. |
 | `notify.activityId`, `notify.widgetId`, `notify.screenWidgetId` | The handles of the three surfaces this app created. |
+| `notify.deviceToken.fallback` | The device token, **only** on a build with no reachable Keychain. See Privacy above. |
 
-The device token is the exception and never appears here. It goes to the Keychain under `KeychainKey.notifyDeviceToken`.
+The device token normally never appears here: it goes to the Keychain through `KeychainService.saveNotifyDeviceToken`. The one exception is the disclosed fallback above.
 
 ### The testable core
 
@@ -259,6 +262,8 @@ Rules under test, in `Claude UsageTests/Notify*Tests.swift`:
 - each status maps to the one error whose remedy differs, and a 429's wait comes from the body's own seconds first, the `Retry-After` header second, and 30 minutes when neither is present
 - every field the app drives is present in the body on every write, as an explicit null when it has no value, while the fields it never drives stay unmentioned
 - an expired session window reads as full rather than as its stale percentage, and an unused per-model window is left out entirely
+- a saved token always reads back again, whichever store took it, and saving a link reports whether it actually landed
+- a link naming a different device clears the three surface handles, while rotating the token for the same device keeps them
 
 ## Prior art
 

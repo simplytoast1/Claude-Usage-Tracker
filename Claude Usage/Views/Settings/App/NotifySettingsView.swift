@@ -30,6 +30,11 @@ struct NotifySettingsView: View {
     /// pass, because answering it means a Keychain lookup.
     @State private var isLinked = false
 
+    /// Whether the saved token is in the Keychain rather than the cleartext
+    /// fallback. Shown rather than assumed, so a "linked" badge never implies
+    /// a stronger answer than the build can actually deliver.
+    @State private var tokenIsSecure = true
+
 
     @State private var isVerifying = false
     @State private var isPublishing = false
@@ -151,6 +156,10 @@ struct NotifySettingsView: View {
 
                 if let kind = draftLink?.kind {
                     deviceKindNotes(kind)
+                }
+
+                if isLinked, !tokenIsSecure {
+                    noteRow("notify.status.token_not_secure".localized)
                 }
 
                 HStack(spacing: DesignTokens.Spacing.medium) {
@@ -358,8 +367,18 @@ struct NotifySettingsView: View {
 
     private func saveLink() {
         guard let link = draftLink else { return }
-        store.saveDeviceLink(link)
+
+        // The store reports whether the token actually landed. Claiming a link
+        // that did not save is how a user ends up pressing Send Now and being
+        // told to add the ID and token they can see in front of them.
+        guard store.saveDeviceLink(link) else {
+            isLinked = false
+            show("notify.status.link_save_failed".localized, isError: true)
+            return
+        }
+
         isLinked = true
+        tokenIsSecure = store.deviceTokenIsSecure()
         show("notify.status.link_saved".localized, isError: false)
         postSettingsChanged()
     }
@@ -367,6 +386,7 @@ struct NotifySettingsView: View {
     private func unlink() {
         store.clearDeviceLink()
         isLinked = false
+        tokenIsSecure = true
         deviceId = ""
         token = ""
         enabled = false
@@ -427,8 +447,9 @@ struct NotifySettingsView: View {
         let providerId = store.gaugeProviderId()
         let quotaKey = store.gaugeQuotaKey()
         gaugeSelectionId = providerId.isEmpty || quotaKey.isEmpty ? "" : "\(providerId)|\(quotaKey)"
-        // From the two values just loaded, so the Keychain is read once here.
+        // From the two values just loaded, so the token store is read once here.
         isLinked = NotifyDeviceLink(deviceId: deviceId, token: token) != nil
+        tokenIsSecure = !isLinked || store.deviceTokenIsSecure()
     }
 
     private func saveGaugeSelection(_ identifier: String) {

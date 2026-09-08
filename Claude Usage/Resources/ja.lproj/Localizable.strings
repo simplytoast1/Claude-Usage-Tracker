@@ -1216,3 +1216,7 @@
 "notify.error.link_is_group" = "That link points at a Notify! group. This needs a device link, not a group.";
 "notify.error.bad_host" = "The Notify! host is not a usable URL.";
 "notify.error.encode_failed" = "This update could not be encoded.";
+
+/* Notify! — token storage */
+"notify.status.link_save_failed" = "Could not store the device token on this Mac, so nothing was linked. This usually means the app was built locally without a signing identity; a signed build stores it in the Keychain.";
+"notify.status.token_not_secure" = "This build has no Keychain available, so the device token is stored in the app's settings in plain text. A signed build keeps it in the Keychain instead.";
