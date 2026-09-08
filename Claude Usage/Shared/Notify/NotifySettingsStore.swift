@@ -53,14 +53,28 @@ final class NotifySettingsStore {
         static let widgetId = "notify.widgetId"
         static let screenWidgetId = "notify.screenWidgetId"
 
-        /// Only used when this build has no reachable Keychain store. See
-        /// `saveDeviceToken`.
-        static let fallbackToken = "notify.deviceToken.fallback"
+        /// Written by one pre-release build that kept the token here when the
+        /// Keychain was unreachable. Only referenced by `purgeLegacyToken()`,
+        /// which deletes it; nothing ever reads it.
+        static let legacyFallbackToken = "notify.deviceToken.fallback"
     }
 
     init(defaults: UserDefaults = .standard, keychain: KeychainService = .shared) {
         self.defaults = defaults
         self.keychain = keychain
+        purgeLegacyToken()
+    }
+
+    /// Deletes a token left in UserDefaults by one pre-release build.
+    ///
+    /// That build stored the token here when no Keychain was reachable, which
+    /// contradicts the promise the README makes for every other credential in
+    /// this app: never in cleartext on disk. The key is gone now, and so is
+    /// anything a copy of that build wrote to it.
+    private func purgeLegacyToken() {
+        guard defaults.object(forKey: Keys.legacyFallbackToken) != nil else { return }
+        defaults.removeObject(forKey: Keys.legacyFallbackToken)
+        LoggingService.shared.logInfo("Notify!: removed a device token left in app settings by an earlier build")
     }
 
     // MARK: - Master switch
@@ -86,59 +100,43 @@ final class NotifySettingsStore {
         defaults.set(deviceId, forKey: Keys.deviceId)
     }
 
-    /// The token: the Keychain when this build can reach one, otherwise the
-    /// fallback below.
+    /// The token, from the Keychain. There is nowhere else it can be.
     func deviceToken() -> String? {
-        if let token = keychain.notifyDeviceToken() { return token }
-        return nonEmpty(defaults.string(forKey: Keys.fallbackToken))
+        keychain.notifyDeviceToken()
     }
 
-    /// Saves the token, and says whether it actually landed.
+    /// Saves the token to the Keychain, and says whether it actually landed.
     ///
-    /// The Keychain first, and it is confirmed by reading back rather than
-    /// trusted. When this build has no reachable Keychain store at all — the
-    /// ordinary case for an ad-hoc signed local build, where the
-    /// data-protection keychain wants an entitlement the build lacks and the
-    /// file-based fallback is gated off to avoid ACL password prompts — the
-    /// token goes to UserDefaults instead.
+    /// The Keychain or nothing. The README promises every credential in this
+    /// app is kept there and never in cleartext on disk
+    /// (GHSA-mfxh-xpwm-23c7), and a push token for the user's phone is not the
+    /// place to make an exception.
     ///
-    /// That fallback is a cleartext secret on disk, so it is only defensible
-    /// because two things are true. It is the same posture this app already
-    /// takes for per-profile secrets in that situation (they stay in the
-    /// `profiles_v3` plist), and `deviceTokenIsSecure()` lets the settings pane
-    /// say out loud which store won rather than implying the stronger answer.
-    /// A Notify! device token can send notifications to the user's own phone;
-    /// it is not an account credential.
+    /// So a build with no reachable Keychain cannot link, and says so. That is
+    /// every ad-hoc signed build: the data-protection keychain wants an
+    /// application-identifier entitlement such a build has no way to carry, and
+    /// the file-based login keychain is deliberately gated off for ad-hoc
+    /// identities because their designated requirement changes on every rebuild
+    /// and the next launch would throw an ACL password prompt (#292). Signing
+    /// the app with a development team fixes it; there is no second store to
+    /// fall back to and there should not be one.
     ///
-    /// - Returns: false only when neither store would take it.
+    /// - Returns: false when the Keychain would not take it, in which case
+    ///   nothing was stored anywhere.
     @discardableResult
     func saveDeviceToken(_ token: String) -> Bool {
-        if keychain.saveNotifyDeviceToken(token) {
-            // Never leave a stale cleartext copy behind once the real store works.
-            defaults.removeObject(forKey: Keys.fallbackToken)
-            return true
+        guard keychain.saveNotifyDeviceToken(token) else {
+            LoggingService.shared.logWarning(
+                "Notify!: no reachable Keychain store in this build, so the device token was not saved"
+            )
+            return false
         }
-
-        LoggingService.shared.logWarning(
-            "Notify!: no reachable Keychain store in this build, keeping the device token in app settings instead"
-        )
-        defaults.set(token, forKey: Keys.fallbackToken)
-        return defaults.string(forKey: Keys.fallbackToken) == token
-    }
-
-    /// Whether the stored token is in the Keychain rather than the fallback.
-    ///
-    /// The pane asks so it can say where the token actually is, rather than
-    /// showing a badge that implies the stronger answer.
-    func deviceTokenIsSecure() -> Bool {
-        keychain.notifyDeviceToken() != nil
+        return true
     }
 
     @discardableResult
     func deleteDeviceToken() -> Bool {
-        let removedFromKeychain = keychain.deleteNotifyDeviceToken()
-        defaults.removeObject(forKey: Keys.fallbackToken)
-        return removedFromKeychain
+        keychain.deleteNotifyDeviceToken()
     }
 
     func hasDeviceToken() -> Bool {

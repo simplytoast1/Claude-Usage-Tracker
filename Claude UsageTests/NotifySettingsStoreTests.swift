@@ -40,7 +40,7 @@ final class NotifySettingsStoreTests: XCTestCase {
     override func tearDown() async throws {
         store.deleteDeviceToken()
         if let preexistingToken {
-            store.saveDeviceToken(preexistingToken)
+            _ = store.saveDeviceToken(preexistingToken)
         }
         preexistingToken = nil
         defaults.removePersistentDomain(forName: suiteName)
@@ -134,28 +134,51 @@ final class NotifySettingsStoreTests: XCTestCase {
 
     /// The regression this file exists for. A token that reports itself saved
     /// and then cannot be read back leaves the pane saying "linked" while every
-    /// publish answers "add your device ID and token". Which store actually
-    /// took it is not the assertion — that it comes back is.
-    func testASavedTokenAlwaysReadsBackAgain() {
-        XCTAssertTrue(store.saveDeviceToken("s3cret-token"))
+    /// publish answers "add your device ID and token".
+    ///
+    /// Skipped rather than failed where no Keychain is reachable, which is CI
+    /// and any unsigned local build. That case is not a bug, it is the
+    /// documented outcome: `saveDeviceToken` returns false and nothing is
+    /// stored, which is exactly what the skip condition reads.
+    func testASavedTokenReadsBackAgain() throws {
+        try XCTSkipUnless(store.saveDeviceToken("s3cret-token"), Self.noKeychain)
         XCTAssertEqual(store.deviceToken(), "s3cret-token")
     }
 
-    func testSavingALinkReportsThatItLandedAndTheLinkIsReadable() {
+    func testSavingALinkReportsThatItLandedAndTheLinkIsReadable() throws {
         let link = NotifyDeviceLink(deviceId: "493F9D2A", token: "s3cret-token")!
 
-        XCTAssertTrue(store.saveDeviceLink(link))
+        try XCTSkipUnless(store.saveDeviceLink(link), Self.noKeychain)
         XCTAssertEqual(store.deviceLink(), link)
         XCTAssertTrue(store.hasDeviceToken())
     }
 
-    func testDeletingTheTokenLeavesNothingLinked() {
-        XCTAssertTrue(store.saveDeviceToken("s3cret-token"))
+    func testDeletingTheTokenLeavesNothingLinked() throws {
+        try XCTSkipUnless(store.saveDeviceToken("s3cret-token"), Self.noKeychain)
         store.deleteDeviceToken()
 
         XCTAssertNil(store.deviceToken())
         XCTAssertNil(store.deviceLink())
     }
+
+    /// A token never reaches UserDefaults, whichever way the save went. The
+    /// README promises every credential in this app stays out of cleartext on
+    /// disk, and this is the assertion that keeps that true for this one.
+    func testATokenIsNeverWrittenToAppSettings() {
+        store.saveDeviceToken("s3cret-token")
+
+        let plist = defaults.dictionaryRepresentation()
+        for (key, value) in plist {
+            XCTAssertFalse(
+                "\(value)".contains("s3cret-token"),
+                "the device token leaked into UserDefaults under \(key)"
+            )
+        }
+    }
+
+    private static let noKeychain =
+        "this build has no reachable Keychain (unsigned), so the token cannot be stored"
+
 
     /// The handles name surfaces standing on a particular phone, so a link
     /// pointing somewhere else invalidates them.
@@ -164,7 +187,10 @@ final class NotifySettingsStoreTests: XCTestCase {
         store.setWidgetId("WG123456")
         store.setScreenWidgetId("SW123456")
 
-        store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "s3cret")!)
+        // The return value is deliberately ignored: clearing the handles
+        // happens before the token is written, so this rule holds even where
+        // the Keychain would not take the token.
+        _ = store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "s3cret")!)
 
         XCTAssertNil(store.activityId())
         XCTAssertNil(store.widgetId())
@@ -175,12 +201,12 @@ final class NotifySettingsStoreTests: XCTestCase {
     /// standing on it are still ours. Clearing their handles would orphan them
     /// and put a duplicate beside each on the next publish.
     func testRotatingTheTokenForTheSameDeviceKeepsTheHandles() {
-        store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "old")!)
+        _ = store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "old")!)
         store.setActivityId("LA123456")
         store.setWidgetId("WG123456")
         store.setScreenWidgetId("SW123456")
 
-        store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "new")!)
+        _ = store.saveDeviceLink(NotifyDeviceLink(deviceId: "493F9D2A", token: "new")!)
 
         XCTAssertEqual(store.activityId(), "LA123456")
         XCTAssertEqual(store.widgetId(), "WG123456")
