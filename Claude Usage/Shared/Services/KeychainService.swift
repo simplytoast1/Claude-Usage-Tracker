@@ -18,13 +18,21 @@ class KeychainService {
     enum KeychainKey: String {
         case apiSessionKey = "com.claudeusagetracker.api-session-key"
         case claudeSessionKey = "com.claudeusagetracker.claude-session-key"
+        /// The per-device secret for the linked Notify! device. Never written
+        /// to UserDefaults, which is cleartext on disk.
+        case notifyDeviceToken = "com.claudeusagetracker.notify-device-token"
 
         var service: String {
             return rawValue
         }
 
         var account: String {
-            return "session-key"
+            switch self {
+            case .notifyDeviceToken:
+                return "device-token"
+            default:
+                return "session-key"
+            }
         }
     }
 
