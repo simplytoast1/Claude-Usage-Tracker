@@ -79,16 +79,36 @@ final class NotifyPublishDriver {
     /// poll against a decision that will not have moved, once a minute forever.
     private static let switchedOffSuppression: TimeInterval = 6 * 60 * 60
 
+    /// Everything this driver leans on, supplied explicitly.
+    ///
+    /// None of these are parameter defaults, which is deliberate. A default
+    /// argument expression is evaluated in a nonisolated context, and this
+    /// target builds with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so every
+    /// one of these values is main-actor isolated and naming it as a default
+    /// warns at the declaration. The convenience initializer below supplies
+    /// them from a main-actor body instead, where reaching them is ordinary.
     init(
-        settings: NotifySettingsStore = .shared,
-        publisher: NotifyPublishing = NotifyGatewayClient(),
-        builder: NotifyPayloadBuilder = NotifyPayloadBuilder(),
-        gate: NotifyPublishGate = NotifyPublishGate()
+        settings: NotifySettingsStore,
+        publisher: NotifyPublishing,
+        builder: NotifyPayloadBuilder,
+        gate: NotifyPublishGate
     ) {
         self.settings = settings
         self.publisher = publisher
         self.builder = builder
         self.gate = gate
+    }
+
+    /// The driver as the app runs it. `publisher` is the one seam a test needs,
+    /// and nil rather than a real default because nil is a literal and costs no
+    /// isolation to write down.
+    convenience init(publisher: NotifyPublishing? = nil) {
+        self.init(
+            settings: .shared,
+            publisher: publisher ?? NotifyGatewayClient(),
+            builder: NotifyPayloadBuilder(),
+            gate: NotifyPublishGate()
+        )
     }
 
     // MARK: - Lifecycle

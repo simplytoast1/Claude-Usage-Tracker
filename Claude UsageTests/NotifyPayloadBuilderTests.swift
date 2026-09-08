@@ -3,6 +3,12 @@ import XCTest
 
 /// The whole decision layer of the Notify! feature: what to show, in what
 /// order, in what words, and in what color.
+///
+/// `@MainActor` because the app target builds with
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so everything under test is
+/// main-actor isolated while the test target's own default is not. Same
+/// reason `NotchHUDCoreTests` and `NotchHookServerTests` carry it.
+@MainActor
 final class NotifyPayloadBuilderTests: XCTestCase {
 
     /// Fixed on purpose, so every countdown below is an explicit arithmetic

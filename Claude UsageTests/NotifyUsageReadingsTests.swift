@@ -3,6 +3,12 @@ import XCTest
 
 /// The seam between `ClaudeUsage` and the flat readings the payload builder
 /// takes: which windows a provider actually reports, and what each one says.
+///
+/// `@MainActor` because the app target builds with
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so everything under test is
+/// main-actor isolated while the test target's own default is not. Same
+/// reason `NotchHUDCoreTests` and `NotchHookServerTests` carry it.
+@MainActor
 final class NotifyUsageReadingsTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 1_700_000_000)

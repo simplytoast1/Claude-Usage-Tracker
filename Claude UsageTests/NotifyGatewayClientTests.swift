@@ -3,6 +3,12 @@ import XCTest
 
 /// The wire: how a status code becomes an error with a remedy, what goes into a
 /// body, and how a URL is built around a secret.
+///
+/// `@MainActor` because the app target builds with
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so everything under test is
+/// main-actor isolated while the test target's own default is not. Same
+/// reason `NotchHUDCoreTests` and `NotchHookServerTests` carry it.
+@MainActor
 final class NotifyGatewayClientTests: XCTestCase {
 
     private func body(_ object: [String: Any]) -> Data {
@@ -254,6 +260,7 @@ final class NotifyGatewayClientTests: XCTestCase {
 
 /// A transport that fails the test if anything reaches it. Used where the point
 /// of the assertion is that no request was ever made.
+@MainActor
 private struct NeverCalledClient: NotifyHTTPClient {
     func request(_ request: URLRequest) async throws -> (Data, URLResponse) {
         XCTFail("no request should have been sent")

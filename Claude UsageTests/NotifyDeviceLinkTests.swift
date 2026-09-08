@@ -3,6 +3,12 @@ import XCTest
 
 /// The id namespaces, what each one can carry, and every shape of credential
 /// the user might paste in.
+///
+/// `@MainActor` because the app target builds with
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so everything under test is
+/// main-actor isolated while the test target's own default is not. Same
+/// reason `NotchHUDCoreTests` and `NotchHookServerTests` carry it.
+@MainActor
 final class NotifyDeviceLinkTests: XCTestCase {
 
     // MARK: - ID validation

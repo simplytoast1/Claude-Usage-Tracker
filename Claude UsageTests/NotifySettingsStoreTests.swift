@@ -6,24 +6,32 @@ import XCTest
 /// The device token is deliberately not exercised here: it lives in the
 /// Keychain, and these assertions are about the defaults-backed half of the
 /// store, which is where all the actual rules are.
+///
+/// `@MainActor` because the app target builds with
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so everything under test is
+/// main-actor isolated while the test target's own default is not. Same
+/// reason `NotchHUDCoreTests` and `NotchHookServerTests` carry it.
+@MainActor
 final class NotifySettingsStoreTests: XCTestCase {
 
     private var suiteName = ""
     private var defaults: UserDefaults!
     private var store: NotifySettingsStore!
 
-    override func setUp() {
-        super.setUp()
+    // The `async throws` overrides rather than the synchronous ones: this class
+    // is `@MainActor`, and only the async variants can carry isolation an
+    // override adds on top of XCTestCase's own. Same shape as
+    // `NotchHookServerTests`.
+    override func setUp() async throws {
         suiteName = "notify.tests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         store = NotifySettingsStore(defaults: defaults)
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         defaults.removePersistentDomain(forName: suiteName)
         defaults = nil
         store = nil
-        super.tearDown()
     }
 
     // MARK: - Defaults

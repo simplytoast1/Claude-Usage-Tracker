@@ -3,6 +3,12 @@ import XCTest
 
 /// When a payload is worth a request. Pure and clock free: `now` is a
 /// parameter, so every rule is a direct arithmetic assertion.
+///
+/// `@MainActor` because the app target builds with
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so everything under test is
+/// main-actor isolated while the test target's own default is not. Same
+/// reason `NotchHUDCoreTests` and `NotchHookServerTests` carry it.
+@MainActor
 final class NotifyPublishGateTests: XCTestCase {
 
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
